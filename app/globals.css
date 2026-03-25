@@ -1,0 +1,4 @@
+@import "tailwindcss";
+
+/* 🔥 THIS LINE IS REQUIRED for dark: classes to work in Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
