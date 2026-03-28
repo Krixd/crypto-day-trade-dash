@@ -14,12 +14,7 @@ interface Coin {
   market_cap: number;
 }
 
-interface UseLocalStorageReturn<T> {
-  value: T;
-  setValue: React.Dispatch<React.SetStateAction<T>>;
-}
-
-function useLocalStorage<T>(key: string, initialValue: T): UseLocalStorageReturn<T> {
+function useLocalStorage<T>(key: string, initialValue: T) {
   const [value, setValue] = useState<T>(() => {
     if (typeof window === 'undefined') return initialValue;
     try {
@@ -42,7 +37,6 @@ export default function CryptoDayTradeDash() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCoin, setSelectedCoin] = useState<string>('bitcoin');
-  const [selectedSymbol, setSelectedSymbol] = useState<string>('BYBIT:BTCUSDT.P'); // Default to perpetual
   const [activeScanner, setActiveScanner] = useState<'gainers' | 'losers' | 'volume' | 'relative' | 'micro' | 'large' | 'trending' | 'momentum'>('gainers');
   const [searchTerm, setSearchTerm] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -53,26 +47,17 @@ export default function CryptoDayTradeDash() {
   const [isDark, setIsDark] = useState(true);
   const [mounted, setMounted] = useState(false);
 
-  const { value: leftWidth, setValue: setLeftWidth } = useLocalStorage<number>('dashLeftWidth', 610);
+  const { value: showMACD, setValue: setShowMACD } = useLocalStorage<boolean>('dashShowMACD', true);
+
+  const { value: leftWidth, setValue: setLeftWidth } = useLocalStorage<number>('dashLeftWidth', 340);
   const { value: rightWidth, setValue: setRightWidth } = useLocalStorage<number>('dashRightWidth', 380);
   const { value: scannerHeight, setValue: setScannerHeight } = useLocalStorage<number>('dashScannerHeight', 520);
   const { value: watchlistHeight, setValue: setWatchlistHeight } = useLocalStorage<number>('dashWatchlistHeight', 340);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const tvContainerRef = useRef<HTMLDivElement>(null);
-  const tableRef = useRef<HTMLTableElement>(null);
+  const [timeframes, setTimeframes] = useState<string[]>(['1', '5', '15', '60']);
 
-  // Persist selected coin
-  useEffect(() => {
-    const savedCoin = localStorage.getItem('selectedCoin');
-    if (savedCoin) setSelectedCoin(savedCoin);
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('selectedCoin', selectedCoin);
-  }, [selectedCoin]);
-
-  const fetchWithRetry = async (url: string, retries = 4, baseDelay = 1500): Promise<any> => {
+  const fetchWithRetry = async (url: string, retries = 4, baseDelay = 1500) => {
     for (let i = 0; i < retries; i++) {
       try {
         const res = await fetch(url);
@@ -101,11 +86,21 @@ export default function CryptoDayTradeDash() {
     }
   }, []);
 
-  const fetchNews = async (coinName: string) => {
+  const fetchNews = async (coinName: string, coinSymbol: string) => {
     try {
-      const q = coinName.toLowerCase().replace(/ /g, '+');
-      const res = await fetch(`https://cryptocurrency.cv/api/news?limit=12&q=${q}`);
-      const data = await res.json();
+      const query = `${coinName} ${coinSymbol}`.trim().toLowerCase().replace(/ /g, '+');
+      let url = `https://cryptocurrency.cv/api/news?limit=20&q=${query}`;
+
+      const res = await fetch(url);
+      let data = await res.json();
+
+      if ((!data.articles || data.articles.length < 5) && coinName) {
+        const fallbackUrl = `https://cryptocurrency.cv/api/news?limit=15&q=${coinName.toLowerCase().replace(/ /g, '+')}`;
+        const fallbackRes = await fetch(fallbackUrl);
+        const fallbackData = await fallbackRes.json();
+        data = fallbackData;
+      }
+
       setNews(data.articles || data || []);
     } catch {
       setNews([]);
@@ -114,13 +109,13 @@ export default function CryptoDayTradeDash() {
 
   useEffect(() => {
     fetchData(true);
-    const interval = setInterval(() => fetchData(), 90000);
+    const interval = setInterval(() => fetchData(), 180000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
   useEffect(() => {
     const coin = coins.find(c => c.id === selectedCoin);
-    if (coin) fetchNews(coin.name);
+    if (coin) fetchNews(coin.name, coin.symbol);
   }, [selectedCoin, coins]);
 
   useEffect(() => {
@@ -141,8 +136,6 @@ export default function CryptoDayTradeDash() {
 
   const loadChart = (coin: Coin) => {
     setSelectedCoin(coin.id);
-    // Changed to perpetual chart: SIRENUSDT → BYBIT:SIRENUSDT.P
-    setSelectedSymbol(`BYBIT:${coin.symbol.toUpperCase()}USDT.P`);
   };
 
   const openBybit = (symbol: string) => {
@@ -150,7 +143,6 @@ export default function CryptoDayTradeDash() {
   };
 
   const openFullTradingView = (symbol: string) => {
-    // Also uses perpetual chart in full view
     window.open(`https://www.tradingview.com/chart/?symbol=BYBIT:${symbol.toUpperCase()}USDT.P`, '_blank');
   };
 
@@ -166,68 +158,50 @@ export default function CryptoDayTradeDash() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
-
       if (e.key >= '1' && e.key <= '8') {
         const scanners: typeof activeScanner[] = ['gainers', 'losers', 'volume', 'relative', 'micro', 'large', 'trending', 'momentum'];
         setActiveScanner(scanners[parseInt(e.key) - 1]);
       }
-
-      if (e.key === 'Enter' && tableRef.current) {
-        const activeRow = tableRef.current.querySelector('tr[tabindex="0"]') as HTMLTableRowElement;
-        if (activeRow) activeRow.click();
-      }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-// ... rest of your imports and component stay exactly the same ...
+  // TradingView 4 charts with MACD toggle
+  useEffect(() => {
+    const coin = coins.find(c => c.id === selectedCoin);
+    const baseSymbol = coin ? `BYBIT:${coin.symbol.toUpperCase()}USDT.P` : 'BYBIT:BTCUSDT.P';
 
-// TradingView Widget (now with permanent MACD)
-useEffect(() => {
-  if (!tvContainerRef.current) return;
-  tvContainerRef.current.innerHTML = '';
+    const studies = showMACD 
+      ? [{ id: 'MACD@tv-basicstudies', inputs: { 'in_0': 12, 'in_1': 26, 'in_2': 9 } }]
+      : [];
 
-  const script = document.createElement('script');
-  script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.async = true;
-  script.innerHTML = JSON.stringify({
-    symbol: selectedSymbol,
-    interval: '5',
-    theme: isDark ? 'dark' : 'light',
-    style: '1',
-    locale: 'en',
-    autosize: true,
-    allow_symbol_change: true,
-    hide_top_toolbar: false,
-    hide_legend: false,
-    hide_side_toolbar: false,
-    backgroundColor: isDark ? '#09090b' : '#ffffff',
+    [0, 1, 2, 3].forEach((i) => {
+      const container = document.getElementById(`tv-chart-${i}`);
+      if (!container) return;
+      container.innerHTML = '';
 
-    // ←←← THIS IS THE NEW PART: Permanent MACD
-    studies: [
-      {
-        id: 'MACD@tv-basicstudies',
-        inputs: {
-          'in_0': 12,   // Fast Length
-          'in_1': 26,   // Slow Length
-          'in_2': 9,    // Signal Smoothing
-        },
-        // Optional: you can override colors here if you want
-        // overrides: {
-        //   'MACD.MACD.color': '#ff0000',
-        //   'MACD.Signal.color': '#00ff00',
-        //   'MACD.Histogram.color': '#ffff00',
-        // }
-      }
-    ],
-  });
+      const script = document.createElement('script');
+      script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+      script.async = true;
+      script.innerHTML = JSON.stringify({
+        symbol: baseSymbol,
+        interval: timeframes[i],
+        theme: isDark ? 'dark' : 'light',
+        style: '1',
+        locale: 'en',
+        autosize: true,
+        allow_symbol_change: false,
+        hide_top_toolbar: true,
+        hide_legend: true,
+        hide_side_toolbar: true,
+        backgroundColor: isDark ? '#09090b' : '#ffffff',
+        studies: studies,
+      });
+      container.appendChild(script);
+    });
+  }, [selectedCoin, timeframes, isDark, showMACD, coins]);
 
-  tvContainerRef.current.appendChild(script);
-}, [selectedSymbol, isDark]);
-
-// ... rest of your component unchanged ...
   const scannerData = useMemo(() => {
     let filtered = [...coins];
 
@@ -267,9 +241,10 @@ useEffect(() => {
     price < 0.00001 ? price.toExponential(2) : price < 1 ? price.toFixed(6) : price.toLocaleString('en-US', { maximumFractionDigits: 4 });
 
   const resetLayout = () => {
-    setLeftWidth(610); setRightWidth(380); setScannerHeight(520); setWatchlistHeight(340);
+    setLeftWidth(340); setRightWidth(380); setScannerHeight(520); setWatchlistHeight(340);
   };
 
+  // Dragging logic
   const [isDraggingLeft, setIsDraggingLeft] = useState(false);
   const [isDraggingRight, setIsDraggingRight] = useState(false);
   const [isDraggingScannerHeight, setIsDraggingScannerHeight] = useState(false);
@@ -285,10 +260,10 @@ useEffect(() => {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
 
-      if (isDraggingLeft) setLeftWidth(Math.max(280, Math.min(e.clientX - rect.left, rect.width - rightWidth - 320)));
+      if (isDraggingLeft) setLeftWidth(Math.max(260, Math.min(e.clientX - rect.left, rect.width - rightWidth - 340)));
       if (isDraggingRight) {
         const newRight = Math.max(280, rect.width - (e.clientX - rect.left));
-        setRightWidth(Math.min(newRight, rect.width - leftWidth - 320));
+        setRightWidth(Math.min(newRight, rect.width - leftWidth - 340));
       }
       if (isDraggingScannerHeight) setScannerHeight(Math.max(300, Math.min(e.clientY - rect.top - 180, 800)));
       if (isDraggingWatchlistHeight) setWatchlistHeight(Math.max(200, Math.min(e.clientY - rect.top - 180, 500)));
@@ -312,6 +287,8 @@ useEffect(() => {
 
   if (!mounted) return <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950" />;
 
+  const currentCoin = coins.find(c => c.id === selectedCoin);
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col overflow-hidden">
       {/* Top Bar */}
@@ -327,15 +304,28 @@ useEffect(() => {
               Updated: {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+
+          <button 
+            onClick={() => setShowMACD(!showMACD)}
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl font-medium transition ${
+              showMACD ? 'bg-emerald-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+            }`}
+          >
+            {showMACD ? 'MACD ON' : 'MACD OFF'}
+          </button>
+
           <button onClick={() => fetchData(true)} className="flex items-center gap-2 px-5 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl font-medium transition" disabled={loading}>
             <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>
+
           <button onClick={resetLayout} className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium transition-all active:scale-95">
             <RotateCcw className="w-5 h-5" /> Reset Layout
           </button>
+
           <button onClick={() => setSoundEnabled(!soundEnabled)} className="flex items-center gap-2 px-4 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition">
             {soundEnabled ? <Bell className="w-5 h-5" /> : <BellOff className="w-5 h-5" />} Alerts {soundEnabled ? 'ON' : 'OFF'}
           </button>
+
           <button onClick={toggleTheme} className="flex items-center gap-2 px-4 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition">
             {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />} {isDark ? 'Light' : 'Dark'}
           </button>
@@ -343,8 +333,8 @@ useEffect(() => {
       </div>
 
       <div ref={containerRef} className="flex flex-1 overflow-hidden relative">
-        {/* LEFT: Scanners + Search */}
-        <div style={{ width: leftWidth }} className="border-r border-zinc-200 dark:border-zinc-700 flex flex-col bg-white dark:bg-zinc-900 relative">
+        {/* LEFT: Scanner Table - No Actions column, name links to Bybit */}
+        <div style={{ width: leftWidth }} className="border-r border-zinc-200 dark:border-zinc-700 flex flex-col bg-white dark:bg-zinc-900 relative min-w-[260px]">
           <div className="p-5 border-b border-zinc-200 dark:border-zinc-700">
             <h2 className="font-semibold text-lg mb-3">SCANNERS</h2>
             
@@ -384,8 +374,8 @@ useEffect(() => {
             </div>
           </div>
 
-          <div style={{ height: scannerHeight }} className="flex-1 overflow-auto p-3">
-            <table ref={tableRef} className="w-full text-sm">
+                    <div style={{ height: scannerHeight }} className="flex-1 overflow-auto p-3">
+            <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-700">
                 <tr>
                   <th className="p-3 text-left w-10"></th>
@@ -394,16 +384,15 @@ useEffect(() => {
                   <th className="p-3 text-right">1h %</th>
                   <th className="p-3 text-right">24h %</th>
                   <th className="p-3 text-right">Vol</th>
-                  <th className="p-3 w-20 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
                 {loading ? (
-                  <tr><td colSpan={7} className="text-center py-20 text-zinc-500">Loading live data...</td></tr>
+                  <tr><td colSpan={6} className="text-center py-20 text-zinc-500">Loading live data...</td></tr>
                 ) : error ? (
-                  <tr><td colSpan={7} className="text-center py-20 text-red-500">{error}</td></tr>
+                  <tr><td colSpan={6} className="text-center py-20 text-red-500">{error}</td></tr>
                 ) : scannerData.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-20 text-zinc-500">No results found</td></tr>
+                  <tr><td colSpan={6} className="text-center py-20 text-zinc-500">No results found</td></tr>
                 ) : (
                   scannerData.map((coin) => {
                     const change1h = coin.price_change_percentage_1h_in_currency || 0;
@@ -412,13 +401,19 @@ useEffect(() => {
                       <tr
                         key={coin.id}
                         onClick={() => loadChart(coin)}
-                        tabIndex={0}
-                        className="group h-16 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer focus:bg-emerald-50 dark:focus:bg-emerald-950/30"
+                        className="group h-14 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"  // tighter row height
                       >
-                        <td className="p-3 pl-4"><img src={coin.image} alt={coin.name} className="w-7 h-7 rounded-full" /></td>
-                        <td className="p-3">
-                          <div className="font-medium">{coin.symbol.toUpperCase()}</div>
-                          <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{coin.name}</div>
+                        <td className="p-3 pl-4">
+                          <img src={coin.image} alt={coin.name} className="w-7 h-7 rounded-full" />
+                        </td>
+                        <td className="p-2.5">  {/* reduced padding */}
+                          <div 
+                            onClick={(e) => { e.stopPropagation(); openBybit(coin.symbol); }}
+                            className="font-medium text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                          >
+                            {coin.symbol.toUpperCase()}
+                          </div>
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate -mt-0.5">{coin.name}</div>
                         </td>
                         <td className={`p-3 text-right font-mono ${isUp ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
                           ${formatPrice(coin.current_price)}
@@ -432,14 +427,6 @@ useEffect(() => {
                         <td className="p-3 text-right text-xs text-zinc-500 dark:text-zinc-400">
                           {(coin.total_volume / 1_000_000).toFixed(0)}M
                         </td>
-                        <td className="p-3 pr-4 flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100">
-                          <button onClick={(e) => { e.stopPropagation(); addToWatchlist(coin.id); }} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded" title="Add to Watchlist">
-                            <Plus className="w-4 h-4" />
-                          </button>
-                          <button onClick={(e) => { e.stopPropagation(); openBybit(coin.symbol); }} className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded text-emerald-600" title="Trade on Bybit">
-                            <ExternalLink className="w-4 h-4" />
-                          </button>
-                        </td>
                       </tr>
                     );
                   })
@@ -452,35 +439,66 @@ useEffect(() => {
           <div onMouseDown={handleMouseDownLeft} className="absolute top-0 right-0 w-1 h-full bg-zinc-300 dark:bg-zinc-600 hover:bg-emerald-500 cursor-col-resize z-50" />
         </div>
 
-        {/* CENTER: Chart */}
+        {/* CENTER: 2x2 Charts */}
         <div className="flex-1 flex flex-col border-r border-zinc-200 dark:border-zinc-700" style={{ height: 'calc(100vh - 73px)' }}>
           <div className="bg-white dark:bg-zinc-900 p-4 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0 flex items-center justify-between">
             <div>
               <div className="text-xl font-semibold flex items-center gap-2">
-                {coins.find(c => c.id === selectedCoin)?.name}
+                {currentCoin?.name}
                 <span className="text-emerald-600 dark:text-emerald-400 text-base font-mono">
-                  {coins.find(c => c.id === selectedCoin)?.symbol.toUpperCase()}USDT.P
+                  {currentCoin?.symbol.toUpperCase()}USDT.P
                 </span>
               </div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">Perpetual Futures • Click row or use keyboard</div>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">Click coin name in scanner to trade on Bybit</div>
             </div>
+
+            {/* Add to Watchlist button moved here */}
+            {currentCoin && (
+              <button 
+                onClick={() => addToWatchlist(currentCoin.id)}
+                className="flex items-center gap-2 px-5 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-xl font-medium transition"
+                disabled={watchlist.includes(currentCoin.id)}
+              >
+                <Plus className="w-5 h-5" />
+                {watchlist.includes(currentCoin.id) ? 'Already in Watchlist' : 'Add to Watchlist'}
+              </button>
+            )}
+
             <button 
-              onClick={() => {
-                const coin = coins.find(c => c.id === selectedCoin);
-                if (coin) openFullTradingView(coin.symbol);
-              }} 
+              onClick={() => currentCoin && openFullTradingView(currentCoin.symbol)} 
               className="flex items-center gap-2 px-4 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 rounded-2xl text-sm font-medium transition"
             >
               <ExternalLink className="w-4 h-4" /> Open Full Chart
             </button>
           </div>
 
-          <div className="flex-1 relative bg-black min-h-[520px] overflow-hidden">
-            <div ref={tvContainerRef} className="absolute inset-0 w-full h-full" />
+          <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-px bg-zinc-800 p-px">
+            {[0,1,2,3].map((i) => (
+              <div key={i} className="relative bg-zinc-900 flex flex-col">
+                <div className="absolute top-2 right-2 z-10 flex gap-1 bg-black/70 rounded-lg p-1">
+                  {['1','3','5','15','30','60','120','240','D'].map((tf) => (
+                    <button
+                      key={tf}
+                      onClick={() => {
+                        const newTfs = [...timeframes];
+                        newTfs[i] = tf;
+                        setTimeframes(newTfs);
+                      }}
+                      className={`px-2.5 py-1 text-xs rounded-md transition ${
+                        timeframes[i] === tf ? 'bg-emerald-600 text-white' : 'hover:bg-zinc-700 text-zinc-400'
+                      }`}
+                    >
+                      {tf === 'D' ? '1D' : tf + 'm'}
+                    </button>
+                  ))}
+                </div>
+                <div id={`tv-chart-${i}`} className="flex-1" />
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* RIGHT: Watchlist + News */}
+        {/* RIGHT: Watchlist + News - unchanged */}
         <div style={{ width: rightWidth }} className="border-l border-zinc-200 dark:border-zinc-700 flex flex-col bg-white dark:bg-zinc-900 relative">
           <div style={{ height: watchlistHeight }} className="flex flex-col border-b border-zinc-200 dark:border-zinc-700">
             <div className="p-5 border-b border-zinc-200 dark:border-zinc-700">
@@ -549,7 +567,7 @@ useEffect(() => {
       </div>
 
       <div className="text-center py-3 text-xs text-zinc-500 dark:text-zinc-400 border-t border-zinc-200 dark:border-zinc-800">
-        Now using Bybit Perpetual charts (USDT.P) • Press 1-8 to switch scanners • ↑↓ + Enter to navigate
+        Coin name in scanner now links directly to Bybit • Add to Watchlist button moved next to chart title • Drag left bar to make it narrower
       </div>
     </div>
   );
